@@ -17,10 +17,10 @@
 
 
 /* ----------------------------------------------------------------
-   CHROME TABS — Direct API Access
+   BROWSER TABS — Direct API Access (via browser-polyfill.js)
 
-   Since this page IS the extension's new tab page, it has full
-   access to chrome.tabs and chrome.storage. No middleman needed.
+   This page uses the unified `browser.*` API provided by the polyfill.
+   Works in both Chrome (chrome.* wrapped) and Safari (native browser.*).
    ---------------------------------------------------------------- */
 
 // All open tabs — populated by fetchOpenTabs()
@@ -34,11 +34,7 @@ let openTabs = [];
  */
 async function fetchOpenTabs() {
   try {
-    const extensionId = chrome.runtime.id;
-    // The new URL for this page is now index.html (not newtab.html)
-    const newtabUrl = `chrome-extension://${extensionId}/index.html`;
-
-    const tabs = await chrome.tabs.query({});
+    const tabs = await browser.tabs.query({});
     openTabs = tabs.map(t => ({
       id:       t.id,
       url:      t.url,
@@ -46,10 +42,10 @@ async function fetchOpenTabs() {
       windowId: t.windowId,
       active:   t.active,
       // Flag Tab Out's own pages so we can detect duplicate new tabs
-      isTabOut: t.url === newtabUrl || t.url === 'chrome://newtab/',
+      isTabOut: isExtensionPage(t.url),
     }));
   } catch {
-    // chrome.tabs API unavailable (shouldn't happen in an extension page)
+    // browser.tabs API unavailable (shouldn't happen in an extension page)
     openTabs = [];
   }
 }
@@ -78,20 +74,20 @@ async function closeTabsByUrls(urls) {
     }
   }
 
-  const allTabs = await chrome.tabs.query({});
-  const toClose = allTabs
-    .filter(tab => {
-      const tabUrl = tab.url || '';
-      if (tabUrl.startsWith('file://') && exactUrls.has(tabUrl)) return true;
-      try {
-        const tabHostname = new URL(tabUrl).hostname;
-        return tabHostname && targetHostnames.includes(tabHostname);
-      } catch { return false; }
-    })
-    .map(tab => tab.id);
+  const allTabs = await browser.tabs.query({});
+    const toClose = allTabs
+      .filter(tab => {
+        const tabUrl = tab.url || '';
+        if (tabUrl.startsWith('file://') && exactUrls.has(tabUrl)) return true;
+        try {
+          const tabHostname = new URL(tabUrl).hostname;
+          return tabHostname && targetHostnames.includes(tabHostname);
+        } catch { return false; }
+      })
+      .map(tab => tab.id);
 
-  if (toClose.length > 0) await chrome.tabs.remove(toClose);
-  await fetchOpenTabs();
+    if (toClose.length > 0) await browser.tabs.remove(toClose);
+    await fetchOpenTabs();
 }
 
 /**
@@ -103,9 +99,9 @@ async function closeTabsByUrls(urls) {
 async function closeTabsExact(urls) {
   if (!urls || urls.length === 0) return;
   const urlSet = new Set(urls);
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await browser.tabs.query({});
   const toClose = allTabs.filter(t => urlSet.has(t.url)).map(t => t.id);
-  if (toClose.length > 0) await chrome.tabs.remove(toClose);
+  if (toClose.length > 0) await browser.tabs.remove(toClose);
   await fetchOpenTabs();
 }
 
@@ -117,8 +113,8 @@ async function closeTabsExact(urls) {
  */
 async function focusTab(url) {
   if (!url) return;
-  const allTabs = await chrome.tabs.query({});
-  const currentWindow = await chrome.windows.getCurrent();
+  const allTabs = await browser.tabs.query({});
+  const currentWindow = await browser.windows.getCurrent();
 
   // Try exact URL match first
   let matches = allTabs.filter(t => t.url === url);
@@ -138,8 +134,8 @@ async function focusTab(url) {
 
   // Prefer a match in a different window so it actually switches windows
   const match = matches.find(t => t.windowId !== currentWindow.id) || matches[0];
-  await chrome.tabs.update(match.id, { active: true });
-  await chrome.windows.update(match.windowId, { focused: true });
+  await browser.tabs.update(match.id, { active: true });
+  await browser.windows.update(match.windowId, { focused: true });
 }
 
 /**
@@ -150,7 +146,7 @@ async function focusTab(url) {
  * keepOne=false → close all copies.
  */
 async function closeDuplicateTabs(urls, keepOne = true) {
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await browser.tabs.query({});
   const toClose = [];
 
   for (const url of urls) {
@@ -165,7 +161,7 @@ async function closeDuplicateTabs(urls, keepOne = true) {
     }
   }
 
-  if (toClose.length > 0) await chrome.tabs.remove(toClose);
+  if (toClose.length > 0) await browser.tabs.remove(toClose);
   await fetchOpenTabs();
 }
 
@@ -175,14 +171,9 @@ async function closeDuplicateTabs(urls, keepOne = true) {
  * Closes all duplicate Tab Out new-tab pages except the current one.
  */
 async function closeTabOutDupes() {
-  const extensionId = chrome.runtime.id;
-  const newtabUrl = `chrome-extension://${extensionId}/index.html`;
-
-  const allTabs = await chrome.tabs.query({});
-  const currentWindow = await chrome.windows.getCurrent();
-  const tabOutTabs = allTabs.filter(t =>
-    t.url === newtabUrl || t.url === 'chrome://newtab/'
-  );
+  const allTabs = await browser.tabs.query({});
+  const currentWindow = await browser.windows.getCurrent();
+  const tabOutTabs = allTabs.filter(t => isExtensionPage(t.url));
 
   if (tabOutTabs.length <= 1) return;
 
@@ -193,15 +184,15 @@ async function closeTabOutDupes() {
     tabOutTabs.find(t => t.active) ||
     tabOutTabs[0];
   const toClose = tabOutTabs.filter(t => t.id !== keep.id).map(t => t.id);
-  if (toClose.length > 0) await chrome.tabs.remove(toClose);
+  if (toClose.length > 0) await browser.tabs.remove(toClose);
   await fetchOpenTabs();
 }
 
 
 /* ----------------------------------------------------------------
-   SAVED FOR LATER — chrome.storage.local
+   SAVED FOR LATER — browser.storage.local
 
-   Replaces the old server-side SQLite + REST API with Chrome's
+   Replaces the old server-side SQLite + REST API with the browser's
    built-in key-value storage. Data persists across browser sessions
    and doesn't require a running server.
 
@@ -226,7 +217,7 @@ async function closeTabOutDupes() {
  * @param {{ url: string, title: string }} tab
  */
 async function saveTabForLater(tab) {
-  const { deferred = [] } = await chrome.storage.local.get('deferred');
+  const { deferred = [] } = await browser.storage.local.get('deferred');
   deferred.push({
     id:        Date.now().toString(),
     url:       tab.url,
@@ -235,7 +226,7 @@ async function saveTabForLater(tab) {
     completed: false,
     dismissed: false,
   });
-  await chrome.storage.local.set({ deferred });
+  await browser.storage.local.set({ deferred });
 }
 
 /**
@@ -246,7 +237,7 @@ async function saveTabForLater(tab) {
  * Splits into active (not completed) and archived (completed).
  */
 async function getSavedTabs() {
-  const { deferred = [] } = await chrome.storage.local.get('deferred');
+  const { deferred = [] } = await browser.storage.local.get('deferred');
   const visible = deferred.filter(t => !t.dismissed);
   return {
     active:   visible.filter(t => !t.completed),
@@ -260,12 +251,12 @@ async function getSavedTabs() {
  * Marks a saved tab as completed (checked off). It moves to the archive.
  */
 async function checkOffSavedTab(id) {
-  const { deferred = [] } = await chrome.storage.local.get('deferred');
+  const { deferred = [] } = await browser.storage.local.get('deferred');
   const tab = deferred.find(t => t.id === id);
   if (tab) {
     tab.completed = true;
     tab.completedAt = new Date().toISOString();
-    await chrome.storage.local.set({ deferred });
+    await browser.storage.local.set({ deferred });
   }
 }
 
@@ -275,11 +266,11 @@ async function checkOffSavedTab(id) {
  * Marks a saved tab as dismissed (removed from all lists).
  */
 async function dismissSavedTab(id) {
-  const { deferred = [] } = await chrome.storage.local.get('deferred');
+  const { deferred = [] } = await browser.storage.local.get('deferred');
   const tab = deferred.find(t => t.id === id);
   if (tab) {
     tab.dismissed = true;
-    await chrome.storage.local.set({ deferred });
+    await browser.storage.local.set({ deferred });
   }
 }
 
@@ -297,7 +288,7 @@ async function dismissSavedTab(id) {
  */
 function playCloseSound() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = new (window.AudioContext)();
     const t = ctx.currentTime;
 
     // Swoosh: shaped white noise through a sweeping bandpass filter
@@ -427,6 +418,8 @@ function animateCardOut(card) {
   setTimeout(() => {
     card.remove();
     checkAndShowEmptyState();
+    // Re-calculate masonry layout after card removal
+    applyMasonryLayout();
   }, 300);
 }
 
@@ -720,16 +713,7 @@ let domainGroups = [];
  * pages, about:blank, etc.
  */
 function getRealTabs() {
-  return openTabs.filter(t => {
-    const url = t.url || '';
-    return (
-      !url.startsWith('chrome://') &&
-      !url.startsWith('chrome-extension://') &&
-      !url.startsWith('about:') &&
-      !url.startsWith('edge://') &&
-      !url.startsWith('brave://')
-    );
-  });
+  return openTabs.filter(t => !isBrowserInternalUrl(t.url));
 }
 
 /**
@@ -767,9 +751,10 @@ function buildOverflowChips(hiddenTabs, urlCounts = {}) {
     const safeTitle = label.replace(/"/g, '&quot;');
     let domain = '';
     try { domain = new URL(tab.url).hostname; } catch {}
+    // Use lazy loading for favicons to improve scroll performance
     const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
     return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
-      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
+      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}
       <span class="chip-text">${label}</span>${dupeTag}
       <div class="chip-actions">
         <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
@@ -848,9 +833,10 @@ function renderDomainCard(group) {
     const safeTitle = label.replace(/"/g, '&quot;');
     let domain = '';
     try { domain = new URL(tab.url).hostname; } catch {}
+    // Use lazy loading for favicons to improve scroll performance
     const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
     return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
-      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
+      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}
       <span class="chip-text">${label}</span>${dupeTag}
       <div class="chip-actions">
         <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
@@ -1034,8 +1020,8 @@ async function renderStaticDashboard() {
   // Landing pages (Gmail inbox, Twitter home, etc.) get their own special group
   // so they can be closed together without affecting content tabs on the same domain.
   const LANDING_PAGE_PATTERNS = [
-    { hostname: 'mail.google.com', test: (p, h) =>
-        !h.includes('#inbox/') && !h.includes('#sent/') && !h.includes('#search/') },
+    { hostname: 'mail.google.com', test: (_pathname, urlStr) =>
+        !urlStr.includes('#inbox/') && !urlStr.includes('#sent/') && !urlStr.includes('#search/') },
     { hostname: 'x.com',               pathExact: ['/home'] },
     { hostname: 'www.linkedin.com',    pathExact: ['/'] },
     { hostname: 'github.com',          pathExact: ['/'] },
@@ -1170,6 +1156,55 @@ async function renderStaticDashboard() {
 
 async function renderDashboard() {
   await renderStaticDashboard();
+  // Apply masonry layout after DOM update
+  requestAnimationFrame(() => {
+    applyMasonryLayout();
+  });
+}
+
+/* ----------------------------------------------------------------
+   MASONRY LAYOUT — true compact waterfall layout
+   Cards are positioned absolutely within a relative container,
+   filling gaps left by shorter cards.
+   ---------------------------------------------------------------- */
+function applyMasonryLayout() {
+  const container = document.getElementById('openTabsMissions');
+  if (!container) return;
+
+  const cards = Array.from(container.querySelectorAll('.mission-card'));
+  if (cards.length === 0) return;
+
+  // Get container width and compute column count
+  const containerWidth = container.offsetWidth;
+  const gap = 12;
+  const minColumnWidth = 280;
+  const numColumns = Math.max(1, Math.floor((containerWidth + gap) / (minColumnWidth + gap)));
+  const columnWidth = (containerWidth - (numColumns - 1) * gap) / numColumns;
+
+  // Track height of each column
+  const columnHeights = new Array(numColumns).fill(0);
+
+  cards.forEach(card => {
+    // Find the shortest column
+    const shortestCol = columnHeights.indexOf(Math.min(...columnHeights));
+    const x = shortestCol * (columnWidth + gap);
+    const y = columnHeights[shortestCol];
+
+    // Position the card
+    card.style.position = 'absolute';
+    card.style.width = `${columnWidth}px`;
+    card.style.left = `${x}px`;
+    card.style.top = `${y}px`;
+    card.style.marginBottom = '0';
+
+    // Update column height
+    columnHeights[shortestCol] += card.offsetHeight + gap;
+  });
+
+  // Set container height to tallest column
+  const maxHeight = Math.max(...columnHeights);
+  container.style.position = 'relative';
+  container.style.height = `${maxHeight}px`;
 }
 
 
@@ -1227,10 +1262,10 @@ document.addEventListener('click', async (e) => {
     const tabUrl = actionEl.dataset.tabUrl;
     if (!tabUrl) return;
 
-    // Close the tab in Chrome directly
-    const allTabs = await chrome.tabs.query({});
+    // Close the tab directly
+    const allTabs = await browser.tabs.query({});
     const match   = allTabs.find(t => t.url === tabUrl);
-    if (match) await chrome.tabs.remove(match.id);
+    if (match) await browser.tabs.remove(match.id);
     await fetchOpenTabs();
 
     playCloseSound();
@@ -1253,6 +1288,8 @@ document.addEventListener('click', async (e) => {
             animateCardOut(c);
           }
         });
+        // Re-calculate masonry layout after chip removal
+        applyMasonryLayout();
       }, 200);
     }
 
@@ -1280,10 +1317,10 @@ document.addEventListener('click', async (e) => {
       return;
     }
 
-    // Close the tab in Chrome
-    const allTabs = await chrome.tabs.query({});
+    // Close the tab
+    const allTabs = await browser.tabs.query({});
     const match   = allTabs.find(t => t.url === tabUrl);
-    if (match) await chrome.tabs.remove(match.id);
+    if (match) await browser.tabs.remove(match.id);
     await fetchOpenTabs();
 
     // Animate chip out
@@ -1368,6 +1405,9 @@ document.addEventListener('click', async (e) => {
     const idx = domainGroups.indexOf(group);
     if (idx !== -1) domainGroups.splice(idx, 1);
 
+    // Re-calculate masonry layout after domain close
+    setTimeout(() => applyMasonryLayout(), 350);
+
     const groupLabel = group.domain === '__landing-pages__' ? 'Homepages' : (group.label || friendlyDomain(group.domain));
     showToast(`Closed ${urls.length} tab${urls.length !== 1 ? 's' : ''} from ${groupLabel}`);
 
@@ -1428,6 +1468,9 @@ document.addEventListener('click', async (e) => {
       animateCardOut(c);
     });
 
+    // Re-calculate masonry layout after closing all tabs
+    setTimeout(() => applyMasonryLayout(), 350);
+
     showToast('All tabs closed. Fresh start.');
     return;
   }
@@ -1477,6 +1520,100 @@ document.addEventListener('input', async (e) => {
 
 
 /* ----------------------------------------------------------------
+   THEME MANAGEMENT — Auto-follow Safari system appearance
+   ---------------------------------------------------------------- */
+
+// Theme states: 'auto' (follow system), 'light', 'dark'
+let currentTheme = 'auto';
+
+/**
+ * getSystemTheme()
+ * Returns 'dark' or 'light' based on the system's prefers-color-scheme.
+ */
+function getSystemTheme() {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+/**
+ * applyTheme(theme)
+ * Applies the given theme: 'auto', 'light', or 'dark'.
+ * - 'auto' removes the data-theme attribute so CSS media queries take over.
+ * - 'light' / 'dark' force the theme via data-theme attribute.
+ */
+function applyTheme(theme) {
+  currentTheme = theme;
+  const root = document.documentElement;
+  const toggle = document.getElementById('themeToggle');
+  const iconLight = document.getElementById('themeIconLight');
+  const iconDark = document.getElementById('themeIconDark');
+  const iconAuto = document.getElementById('themeIconAuto');
+
+  if (theme === 'auto') {
+    root.removeAttribute('data-theme');
+    if (toggle) toggle.setAttribute('data-tooltip', 'Follow system');
+  } else {
+    root.setAttribute('data-theme', theme);
+    if (toggle) toggle.setAttribute('data-tooltip', theme === 'light' ? 'Light mode' : 'Dark mode');
+  }
+
+  // Update icon visibility
+  if (iconLight) iconLight.style.display = theme === 'light' ? 'block' : 'none';
+  if (iconDark) iconDark.style.display = theme === 'dark' ? 'block' : 'none';
+  if (iconAuto) iconAuto.style.display = theme === 'auto' ? 'block' : 'none';
+}
+
+/**
+ * cycleTheme()
+ * Cycles through the three theme states: auto → light → dark → auto.
+ */
+function cycleTheme() {
+  const next = currentTheme === 'auto' ? 'light' : currentTheme === 'light' ? 'dark' : 'auto';
+  applyTheme(next);
+  try {
+    localStorage.setItem('tab-out-theme', next);
+  } catch {
+    // localStorage may be unavailable in some contexts
+  }
+}
+
+/**
+ * initTheme()
+ * Initializes the theme on page load:
+ * 1. Reads saved preference from localStorage (if any).
+ * 2. Falls back to 'auto' (follow system).
+ * 3. Listens for system theme changes when in auto mode.
+ */
+function initTheme() {
+  // Try to load saved preference
+  let saved = 'auto';
+  try {
+    saved = localStorage.getItem('tab-out-theme') || 'auto';
+  } catch {
+    // localStorage unavailable
+  }
+
+  applyTheme(saved);
+
+  // Listen for system theme changes — when in auto mode, the CSS media query
+  // handles it automatically. But if we ever want JS-side reactivity:
+  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  mediaQuery.addEventListener('change', () => {
+    if (currentTheme === 'auto') {
+      // CSS media query will handle the switch automatically
+      // We just ensure the UI reflects it if needed
+    }
+  });
+
+  // Bind click handler to theme toggle button
+  const toggle = document.getElementById('themeToggle');
+  if (toggle) {
+    toggle.addEventListener('click', cycleTheme);
+  }
+}
+
+
+/* ----------------------------------------------------------------
    INITIALIZE
    ---------------------------------------------------------------- */
+initTheme();
 renderDashboard();

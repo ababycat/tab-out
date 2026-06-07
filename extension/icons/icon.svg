@@ -1,14 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <!-- Rounded rectangle background in amber -->
-  <rect x="4" y="4" width="120" height="120" rx="24" ry="24" fill="#c8713a"/>
-  <!-- White "M" letter centered -->
-  <text
-    x="64"
-    y="90"
-    font-family="Georgia, serif"
-    font-size="80"
-    font-weight="bold"
-    fill="white"
-    text-anchor="middle"
-  >M</text>
+  <!-- Clean, minimalist icon for Safari toolbar -->
+  <rect x="20" y="24" width="88" height="80" rx="10" ry="10"
+        fill="none" stroke="#000000" stroke-width="8" stroke-linejoin="round"/>
+  <line x1="20" y1="46" x2="108" y2="46"
+        stroke="#000000" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="38" cy="35" r="4.5" fill="#000000"/>
+  <circle cx="56" cy="35" r="4.5" fill="#000000"/>
 </svg>

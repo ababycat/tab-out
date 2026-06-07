@@ -6,3 +6,7 @@ docs/superpowers/
 
 # Personal config (landing page patterns, etc.) — never push to GitHub
 extension/config.local.js
+
+# Safari build outputs
+Tab Out/
+safari-build/

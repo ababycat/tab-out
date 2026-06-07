@@ -1,3 +1,30 @@
+# Tab Out for Safari
+
+This is a Safari fork of the original [Tab Out](https://github.com/zarazhangrui/tab-out) Chrome extension. All the same features — grouped tabs, one-click close, save for later — plus a few extras.
+
+### What's new in this fork
+
+- **Masonry layout** — tab groups are arranged in a compact waterfall layout instead of a fixed grid, making better use of vertical space
+- **Dark mode** — full dark theme support with automatic system appearance detection, plus a manual toggle to cycle between auto / light / dark
+
+![Safari demo](image.png)
+
+### Build for Safari
+
+```bash
+./build-safari.sh
+```
+
+This generates a native Safari extension project in `Tab Out/`. Open it in Xcode, sign it with your Apple Developer team, and run. The script preserves your signing settings between rebuilds.
+
+### Safari differences
+
+- Click the toolbar icon to open the dashboard in a new tab (Safari doesn't support new-tab-page overrides)
+- Badge count is disabled to avoid the red number bubble on the toolbar icon
+- Toolbar icon appears in the system accent color when active — this is Safari's standard behavior for all extensions
+
+---
+
 # Tab Out
 
 **Keep tabs on your tabs.**
